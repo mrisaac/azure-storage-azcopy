@@ -21,7 +21,6 @@
 package ste
 
 import (
-	"bytes"
 	"context"
 	"net/url"
 
@@ -94,13 +93,8 @@ func (c *urlToBlockBlobCopier) generateCreateEmptyBlob(id common.ChunkID, blockI
 
 		jptm.LogChunkStatus(id, common.EWaitReason.S2SCopyOnWire())
 
-		// Stage an empty chunk and set the block ID
-		encodedBlockID := c.generateEncodedBlockID()
-		c.setBlockID(blockIndex, encodedBlockID)
-		if _, err := c.destBlockBlobURL.StageBlock(c.jptm.Context(), encodedBlockID, bytes.NewReader(nil), azblob.LeaseAccessConditions{}, nil); err != nil {
-			jptm.FailActiveSend("Creating empty blob", err)
-			return
-		}
+		// Empty the block list
+		c.blockIDs = make([]string, 0)
 	})
 }
 
