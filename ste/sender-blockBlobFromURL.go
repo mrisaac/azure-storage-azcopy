@@ -65,11 +65,9 @@ func newURLToBlockBlobCopier(jptm IJobPartTransferMgr, destination string, p pip
 // Returns a chunk-func for blob copies
 func (c *urlToBlockBlobCopier) GenerateCopyFunc(id common.ChunkID, blockIndex int32, adjustedChunkSize int64, chunkIsWholeFile bool) chunkFunc {
 	if blockIndex == 0 && adjustedChunkSize == 0 {
-		setPutListNeed(&c.atomicPutListIndicator, putListNotNeeded)
-		return c.generateCreateEmptyBlob(id)
+		return c.generateCreateEmptyBlob(id, blockIndex)
 	}
 
-	setPutListNeed(&c.atomicPutListIndicator, putListNeeded)
 	return c.generatePutBlockFromURL(id, blockIndex, adjustedChunkSize)
 }
 
@@ -90,13 +88,16 @@ func (c *urlToBlockBlobCopier) GenerateCopyFunc(id common.ChunkID, blockIndex in
 
 // generateCreateEmptyBlob generates a func to create empty blob in destination.
 // This could be replaced by sync version of copy blob from URL.
-func (c *urlToBlockBlobCopier) generateCreateEmptyBlob(id common.ChunkID) chunkFunc {
+func (c *urlToBlockBlobCopier) generateCreateEmptyBlob(id common.ChunkID, blockIndex int32) chunkFunc {
 	return createSendToRemoteChunkFunc(c.jptm, id, func() {
 		jptm := c.jptm
 
 		jptm.LogChunkStatus(id, common.EWaitReason.S2SCopyOnWire())
-		// Create blob and finish.
-		if _, err := c.destBlockBlobURL.Upload(c.jptm.Context(), bytes.NewReader(nil), c.headersToApply, c.metadataToApply, azblob.BlobAccessConditions{}); err != nil {
+
+		// Stage an empty chunk and set the block ID
+		encodedBlockID := c.generateEncodedBlockID()
+		c.setBlockID(blockIndex, encodedBlockID)
+		if _, err := c.destBlockBlobURL.StageBlock(c.jptm.Context(), encodedBlockID, bytes.NewReader(nil), azblob.LeaseAccessConditions{}, nil); err != nil {
 			jptm.FailActiveSend("Creating empty blob", err)
 			return
 		}

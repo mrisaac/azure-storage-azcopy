@@ -51,8 +51,7 @@ type blockBlobSenderBase struct {
 	headersToApply  azblob.BlobHTTPHeaders
 	metadataToApply azblob.Metadata
 
-	atomicPutListIndicator int32
-	muBlockIDs             *sync.Mutex
+	muBlockIDs *sync.Mutex
 }
 
 func newBlockBlobSenderBase(jptm IJobPartTransferMgr, destination string, p pipeline.Pipeline, pacer pacer, srcInfoProvider ISourceInfoProvider, inferredAccessTierType azblob.AccessTierType) (*blockBlobSenderBase, error) {
@@ -125,14 +124,10 @@ func (s *blockBlobSenderBase) Epilogue() {
 	s.muBlockIDs.Lock()
 	blockIDs := s.blockIDs
 	s.muBlockIDs.Unlock()
-	shouldPutBlockList := getPutListNeed(&s.atomicPutListIndicator)
-	if shouldPutBlockList == putListNeedUnknown && !jptm.WasCanceled() {
-		panic(errors.New("'put list' need flag was never set"))
-	}
-	// TODO: finalize and wrap in functions whether 0 is included or excluded in status comparisons
 
+	// TODO: finalize and wrap in functions whether 0 is included or excluded in status comparisons
 	// commit block list if necessary
-	if jptm.TransferStatus() > 0 && shouldPutBlockList == putListNeeded {
+	if jptm.TransferStatus() > 0 {
 		jptm.Log(pipeline.LogDebug, fmt.Sprintf("Conclude Transfer with BlockList %s", blockIDs))
 
 		// commit the blocks.

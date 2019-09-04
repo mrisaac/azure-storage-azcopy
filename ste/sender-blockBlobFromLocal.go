@@ -21,8 +21,6 @@
 package ste
 
 import (
-	"bytes"
-
 	"github.com/Azure/azure-pipeline-go/pipeline"
 	"github.com/Azure/azure-storage-blob-go/azblob"
 
@@ -54,10 +52,8 @@ func (u *blockBlobUploader) GenerateUploadFunc(id common.ChunkID, blockIndex int
 		if blockIndex > 0 {
 			panic("chunk cannot be whole file where there is more than one chunk")
 		}
-		setPutListNeed(&u.atomicPutListIndicator, putListNeeded)
 		return u.generatePutWholeBlob(id, blockIndex, reader)
 	} else {
-		setPutListNeed(&u.atomicPutListIndicator, putListNeeded)
 		return u.generatePutBlock(id, blockIndex, reader)
 	}
 }
@@ -94,7 +90,7 @@ func (u *blockBlobUploader) generatePutWholeBlob(id common.ChunkID, blockIndex i
 		jptm.LogChunkStatus(id, common.EWaitReason.Body())
 		var err error
 		if jptm.Info().SourceSize == 0 {
-			_, err = u.destBlockBlobURL.StageBlock(jptm.Context(), encodedBlockID, bytes.NewReader(nil), azblob.LeaseAccessConditions{}, nil)
+			u.blockIDs = make([]string, 0) // Empty block ID list
 		} else {
 			// Upload the file
 			body := newPacedRequestBody(jptm.Context(), reader, u.pacer)
@@ -112,9 +108,7 @@ func (u *blockBlobUploader) generatePutWholeBlob(id common.ChunkID, blockIndex i
 func (u *blockBlobUploader) Epilogue() {
 	jptm := u.jptm
 
-	shouldPutBlockList := getPutListNeed(&u.atomicPutListIndicator)
-
-	if jptm.TransferStatus() > 0 && shouldPutBlockList == putListNeeded {
+	if jptm.TransferStatus() > 0 {
 
 		md5Hash, ok := <-u.md5Channel
 		if ok {
