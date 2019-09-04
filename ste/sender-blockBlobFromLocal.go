@@ -24,8 +24,9 @@ import (
 	"bytes"
 
 	"github.com/Azure/azure-pipeline-go/pipeline"
-	"github.com/Azure/azure-storage-azcopy/common"
 	"github.com/Azure/azure-storage-blob-go/azblob"
+
+	"github.com/Azure/azure-storage-azcopy/common"
 )
 
 type blockBlobUploader struct {
@@ -53,7 +54,7 @@ func (u *blockBlobUploader) GenerateUploadFunc(id common.ChunkID, blockIndex int
 		if blockIndex > 0 {
 			panic("chunk cannot be whole file where there is more than one chunk")
 		}
-		setPutListNeed(&u.atomicPutListIndicator, putListNotNeeded)
+		setPutListNeed(&u.atomicPutListIndicator, putListNeeded)
 		return u.generatePutWholeBlob(id, blockIndex, reader)
 	} else {
 		setPutListNeed(&u.atomicPutListIndicator, putListNeeded)
@@ -86,26 +87,18 @@ func (u *blockBlobUploader) generatePutWholeBlob(id common.ChunkID, blockIndex i
 
 	return createSendToRemoteChunkFunc(u.jptm, id, func() {
 		jptm := u.jptm
+		encodedBlockID := u.generateEncodedBlockID()
+		u.setBlockID(blockIndex, encodedBlockID)
 
 		// Upload the blob
 		jptm.LogChunkStatus(id, common.EWaitReason.Body())
 		var err error
 		if jptm.Info().SourceSize == 0 {
-			_, err = u.destBlockBlobURL.Upload(jptm.Context(), bytes.NewReader(nil), u.headersToApply, u.metadataToApply, azblob.BlobAccessConditions{})
+			_, err = u.destBlockBlobURL.StageBlock(jptm.Context(), encodedBlockID, bytes.NewReader(nil), azblob.LeaseAccessConditions{}, nil)
 		} else {
-			// File with content
-
-			// Get the MD5 that was computed as we read the file
-			md5Hash, ok := <-u.md5Channel
-			if !ok {
-				jptm.FailActiveUpload("Getting hash", errNoHash)
-				return
-			}
-			u.headersToApply.ContentMD5 = md5Hash
-
 			// Upload the file
 			body := newPacedRequestBody(jptm.Context(), reader, u.pacer)
-			_, err = u.destBlockBlobURL.Upload(jptm.Context(), body, u.headersToApply, u.metadataToApply, azblob.BlobAccessConditions{})
+			_, err = u.destBlockBlobURL.StageBlock(jptm.Context(), encodedBlockID, body, azblob.LeaseAccessConditions{}, nil)
 		}
 
 		// if the put blob is a failure, update the transfer status to failed
@@ -128,7 +121,7 @@ func (u *blockBlobUploader) Epilogue() {
 			u.headersToApply.ContentMD5 = md5Hash
 		} else {
 			jptm.FailActiveSend("Getting hash", errNoHash)
-			// don't return, since need cleanup below
+			return
 		}
 	}
 
